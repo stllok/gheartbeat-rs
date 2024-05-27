@@ -18,18 +18,19 @@ jobs:
     strategy:
       matrix:
           os: [windows-latest, ubuntu-latest]
+          target: [i686-pc-windows-msvc, x86_64-pc-windows-msvc, i686-unknown-linux-gnu, x86_64-unknown-linux-gnu]
           include:
-              - target: i686-pc-windows-msvc
-                name: gmsv_gheartbeat_win32.dll
+              - name: gmsv_gheartbeat_win32.dll
+                target: i686-pc-windows-msvc
                 os: windows-latest
-              - target: x86_64-pc-windows-msvc
-                name: gmsv_gheartbeat_win64.dll
+              - name: gmsv_gheartbeat_win64.dll
+                target: x86_64-pc-windows-msvc
                 os: windows-latest
-              - target: i686-unknown-linux-gnu
-                name: gmsv_gheartbeat_linux.dll
+              - name: gmsv_gheartbeat_linux.dll
+                target: i686-unknown-linux-gnu
                 os: ubuntu-latest
-              - target: x86_64-unknown-linux-gnu
-                name: gmsv_gheartbeat_linux64.dll
+              - name: gmsv_gheartbeat_linux64.dll
+                target: x86_64-unknown-linux-gnu
                 os: ubuntu-latest
     steps:
       - name: Checkout code
@@ -73,8 +74,8 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ matrix.target }}-artifacts
-          path: release/${{ matrix.target }}/
+          name: ${{ matrix.name }}
+          path: release/${{ matrix.target }}/${{ matrix.name }}
 
       # - name: Create Release (if tag push)
       #   if: startsWith(github.ref, 'refs/tags/')

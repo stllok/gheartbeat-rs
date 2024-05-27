@@ -1,8 +1,11 @@
 name: Rust Library Build and Release
 
 on:
+  # Trigger the workflow manually
+  workflow_dispatch:
+  
   push:
-    tags:
+    branches:
       - 'main'
 
 env:

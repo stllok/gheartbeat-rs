@@ -38,7 +38,8 @@ jobs:
       - name: Install Rust (stable)
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ matrix.target }}
+          toolchain: stable
+          target: ${{ matrix.target }}
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v3

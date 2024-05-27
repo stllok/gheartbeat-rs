@@ -1,0 +1,10 @@
+[package]
+name = "gheartbeat-rs"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rglua = "3.0.0-beta2"

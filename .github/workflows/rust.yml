@@ -14,20 +14,23 @@ env:
 jobs:
   build-and-release:
     name: Build and Release
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        target:
-          - i686-pc-windows-msvc
-          - x86_64-pc-windows-msvc
-          - i686-unknown-linux-gnu
-          - x86_64-unknown-linux-gnu
-        name:
-          - gmsv_gheartbeat_win32.dll
-          - gmsv_gheartbeat_win64.dll
-          - gmsv_gheartbeat_linux.dll
-          - gmsv_gheartbeat_linux64.dll
-
+          os: [windows-latest, ubuntu-latest]
+          include:
+              - target: i686-pc-windows-msvc
+                name: gmsv_gheartbeat_win32.dll
+                os: windows-latest
+              - target: x86_64-pc-windows-msvc
+                name: gmsv_gheartbeat_win64.dll
+                os: windows-latest
+              - target: i686-unknown-linux-gnu
+                name: gmsv_gheartbeat_linux.dll
+                os: ubuntu-latest
+              - target: x86_64-unknown-linux-gnu
+                name: gmsv_gheartbeat_linux64.dll
+                os: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3

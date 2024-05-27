@@ -8,3 +8,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rglua = "3.0.0-beta2"
+sysinfo = { version = "0.30.12", default-features = false }
+
+[profile.release]
+opt-level = "z"
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

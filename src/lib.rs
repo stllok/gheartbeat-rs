@@ -1,13 +1,24 @@
 use std::{
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        OnceLock,
+    },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rglua::prelude::*;
+use sysinfo::{Pid, Signal, System};
 
 static LAST_HEARTBEAT: AtomicU64 = AtomicU64::new(0);
+static IS_NO_PLAYER: AtomicBool = AtomicBool::new(true);
 static IS_HOOKED: AtomicBool = AtomicBool::new(false);
+static PID: OnceLock<u32> = OnceLock::new();
+
+#[inline(always)]
+fn get_pid() -> u32 {
+    *PID.get_or_init(std::process::id)
+}
 
 #[inline(always)]
 fn get_current_time() -> u64 {
@@ -22,6 +33,22 @@ fn is_health(threshold: u64) -> bool {
     get_current_time() - LAST_HEARTBEAT.load(Ordering::Relaxed) <= threshold
 }
 
+#[inline(always)]
+fn ping() {
+    LAST_HEARTBEAT.store(get_current_time(), Ordering::Relaxed);
+}
+
+#[inline(always)]
+fn kill_process() {
+    if let Some(process) = System::new_all().process(Pid::from_u32(get_pid())) {
+        println!("[gHeartbeat] Kill with Signal 9");
+        process.kill_with(Signal::Kill);
+    } else {
+        println!("[gHeartbeat] Kill process exit");
+        std::process::exit(0);
+    }
+}
+
 fn bg_check_health(threshold: u64, interval: u64) {
     println!("[gHeartbeat] Attached health check");
     println!("[gHeartbeat] Automatic stop server if {threshold} seconds no response");
@@ -32,18 +59,26 @@ fn bg_check_health(threshold: u64, interval: u64) {
 
         #[cfg(debug_assertions)]
         println!(
-            "[gHeartbeat DEBUG] current time: {}, recorded time: {}",
+            "[gHeartbeat DEBUG] current time: {}, recorded time: {}, duration: {}, empty server: {}",
             get_current_time(),
-            LAST_HEARTBEAT.load(Ordering::Relaxed)
+            LAST_HEARTBEAT.load(Ordering::Relaxed),
+            get_current_time() - LAST_HEARTBEAT.load(Ordering::Relaxed),
+            IS_NO_PLAYER.load(Ordering::Relaxed)
         );
 
         if !is_health(threshold) {
             println!(
                 "[gHeartbeat] Detected server no response within {threshold} seconds, stopping!!!"
             );
-            std::process::exit(0);
+            kill_process();
+        }
+
+        // mark as ping when no player so it won't stop the server when no one inside
+        if IS_NO_PLAYER.load(Ordering::Relaxed) {
+            ping();
         }
     }
+    println!("[gHeartbeat] Dropping background thread");
 }
 
 #[lua_function]
@@ -51,7 +86,19 @@ fn ping_alive(_l: LuaState) -> i32 {
     #[cfg(debug_assertions)]
     println!("[gHeartbeat DEBUG] Receive PING from game!",);
 
-    LAST_HEARTBEAT.store(get_current_time(), Ordering::Relaxed);
+    ping();
+
+    // as server responsed, server must contain player inside
+    IS_NO_PLAYER.store(false, Ordering::Relaxed);
+    0
+}
+
+#[lua_function]
+fn server_empty_signal(_l: LuaState) -> i32 {
+    #[cfg(debug_assertions)]
+    println!("[gHeartbeat DEBUG] Receive server empty signal from game!",);
+
+    IS_NO_PLAYER.store(true, Ordering::Relaxed);
     0
 }
 
@@ -61,6 +108,7 @@ fn hook_heartbeat(l: LuaState) -> i32 {
         printgm!(l, "[gHeartbeat] You already hook the function!");
         return 0;
     }
+
     printgm!(l, "[gHeartbeat] Hooking to the modules!");
     IS_HOOKED.store(true, Ordering::Relaxed);
     LAST_HEARTBEAT.store(get_current_time(), Ordering::Relaxed);
@@ -74,9 +122,9 @@ fn hook_heartbeat(l: LuaState) -> i32 {
 }
 
 #[lua_function]
-fn exit(l: LuaState) -> i32 {
+fn manual_exit(l: LuaState) -> i32 {
     printgm!(l, "[gHeartbeat] Requesting exit...");
-    std::process::exit(0);
+    kill_process();
     0
 }
 
@@ -87,15 +135,22 @@ fn open(l: LuaState) -> i32 {
     // Print to the gmod console
     printgm!(l, "[gHeartbeat] Initializing");
 
+    #[cfg(debug_assertions)]
+    printgm!(l, "[gHeartbeat DEBUG] PID: {}", get_pid());
+
+    // get PID at start
+    get_pid();
+
     // Create a library to organize all of our functions to export to gmod.
     let lib = reg! [
-        "exit" => exit,
-        "ping_alive"=> ping_alive,
-        "hook_heartbeat" => hook_heartbeat
+        "manual_exit" => manual_exit,
+        "hook_heartbeat" => hook_heartbeat,
+        "server_empty_signal" => server_empty_signal,
+        "ping_alive"=> ping_alive
     ];
 
-    // Register our functions in ``_G.math``
-    // This WILL NOT overwrite _G.math if it already exists (which it should..)
+    // Register our functions in ``_G.gheartbeat``
+    // This WILL NOT overwrite _G.gheartbeat if it already exists (which it should..)
     luaL_register(l, cstr!("gheartbeat"), lib.as_ptr());
     1
 }

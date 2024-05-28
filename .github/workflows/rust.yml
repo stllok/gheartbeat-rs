@@ -72,7 +72,7 @@ jobs:
            if [ "$RUNNER_OS" == "Linux" ]; then
                 mv target/${{ matrix.target }}/release/libgheartbeat_rs.so release/${{ matrix.target }}/${{ matrix.name }}
            elif [ "$RUNNER_OS" == "Windows" ]; then
-                mv target/${{ matrix.target }}/release/libgheartbeat_rs.dll release/${{ matrix.target }}/${{ matrix.name }}
+                mv target/${{ matrix.target }}/release/gheartbeat_rs.dll release/${{ matrix.target }}/${{ matrix.name }}
            else
                 echo "$RUNNER_OS not supported"
                 exit 1

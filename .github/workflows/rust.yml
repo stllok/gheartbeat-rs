@@ -1,4 +1,4 @@
-name: Rust Library Build and Release
+name: Rust Library Build
 
 on:
   # Trigger the workflow manually
@@ -48,15 +48,6 @@ jobs:
            sudo apt install gcc-multilib -y
         shell: bash
 
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Build for target ${{ matrix.target }}
         uses: actions-rs/cargo@v1
         with:
@@ -84,14 +75,3 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: release/${{ matrix.target }}/${{ matrix.name }}
-
-      # - name: Create Release (if tag push)
-      #   if: startsWith(github.ref, 'refs/tags/')
-      #   uses: softprops/action-gh-release@v1
-      #   with:
-      #     files: |
-      #       release/${{ matrix.target }}/*
-      #     tag_name: ${{ github.ref }}
-      #     generate_release_notes: true
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

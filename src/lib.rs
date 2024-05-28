@@ -10,6 +10,12 @@ use std::{
 use rglua::prelude::*;
 use sysinfo::{Pid, Signal, System};
 
+#[derive(Debug, thiserror::Error)]
+enum ResultError {
+    #[error("You already hook the function!")]
+    HookAlreadyExists,
+}
+
 static LAST_HEARTBEAT: AtomicU64 = AtomicU64::new(0);
 static IS_NO_PLAYER: AtomicBool = AtomicBool::new(true);
 static IS_HOOKED: AtomicBool = AtomicBool::new(false);
@@ -43,10 +49,9 @@ fn kill_process() {
     if let Some(process) = System::new_all().process(Pid::from_u32(get_pid())) {
         println!("[gHeartbeat] Kill with Signal 9");
         process.kill_with(Signal::Kill);
-    } else {
-        println!("[gHeartbeat] Kill process exit");
-        std::process::exit(0);
     }
+    println!("[gHeartbeat] Kill process exit");
+    std::process::exit(0);
 }
 
 fn bg_check_health(threshold: u64, interval: u64) {
@@ -103,22 +108,23 @@ fn server_empty_signal(_l: LuaState) -> i32 {
 }
 
 #[lua_function]
-fn hook_heartbeat(l: LuaState) -> i32 {
+fn hook_heartbeat(l: LuaState) -> Result<i32, ResultError> {
     if IS_HOOKED.load(Ordering::Relaxed) {
-        printgm!(l, "[gHeartbeat] You already hook the function!");
-        return 0;
+        return Err(ResultError::HookAlreadyExists);
     }
 
     printgm!(l, "[gHeartbeat] Hooking to the modules!");
     IS_HOOKED.store(true, Ordering::Relaxed);
     LAST_HEARTBEAT.store(get_current_time(), Ordering::Relaxed);
 
-    let threshold = luaL_checkinteger(l, 1) as u64;
-    let interval = luaL_checkinteger(l, 2) as u64;
+    let (threshold, interval) = (
+        luaL_checkinteger(l, 1) as u64,
+        luaL_checkinteger(l, 2) as u64,
+    );
     thread::spawn(move || bg_check_health(threshold, interval));
     printgm!(l, "[gHeartbeat] Success to hook!");
 
-    0
+    Ok(0)
 }
 
 #[lua_function]

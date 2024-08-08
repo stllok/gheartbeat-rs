@@ -1,3 +1,5 @@
+local ENABLE_EMPTY_WORKSHOP_RESTART = false
+
 -- load modules
 require("gheartbeat")
 
@@ -9,3 +11,9 @@ hook.Add("PlayerDisconnected", "gHeartbeatEmptyNotice", function(_) if player.Ge
 
 -- timer to ping alive
 timer.Create("gHeartbeat_ping", 2, 0, gheartbeat.ping_alive)
+
+-- Stop server if workshop didn't mount (require auto restart enabled)
+if #engine.GetAddons() == 0 and ENABLE_EMPTY_WORKSHOP_RESTART then
+  print("WORKSHOP SABEE DETECTED\nRESTART GO BRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR")
+  gheartbeat.manual_exit()
+end

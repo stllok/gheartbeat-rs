@@ -1,3 +1,4 @@
+use rglua::prelude::*;
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -6,8 +7,6 @@ use std::{
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-use rglua::prelude::*;
 use sysinfo::{Pid, Signal, System};
 
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +18,7 @@ enum ResultError {
 static LAST_HEARTBEAT: AtomicU64 = AtomicU64::new(0);
 static IS_NO_PLAYER: AtomicBool = AtomicBool::new(true);
 static IS_HOOKED: AtomicBool = AtomicBool::new(false);
+static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 static PID: OnceLock<u32> = OnceLock::new();
 
 #[inline(always)]
@@ -62,18 +62,20 @@ fn bg_check_health(threshold: u64, interval: u64) {
     while IS_HOOKED.load(Ordering::Relaxed) {
         thread::sleep(Duration::from_secs(interval));
 
-        #[cfg(debug_assertions)]
-        println!(
-            "[gHeartbeat DEBUG] current time: {}, recorded time: {}, duration: {}, empty server: {}",
-            get_current_time(),
-            LAST_HEARTBEAT.load(Ordering::Relaxed),
-            get_current_time() - LAST_HEARTBEAT.load(Ordering::Relaxed),
-            IS_NO_PLAYER.load(Ordering::Relaxed)
-        );
+        if DEBUG_MODE.load(Ordering::Relaxed) {
+            println!(
+                "[gHeartbeat DEBUG] current time: {}, recorded time: {}, duration: {}, empty server: {}",
+                get_current_time(),
+                LAST_HEARTBEAT.load(Ordering::Relaxed),
+                get_current_time() - LAST_HEARTBEAT.load(Ordering::Relaxed),
+                IS_NO_PLAYER.load(Ordering::Relaxed)
+            );
+        }
 
         if !is_health(threshold) {
             println!(
-                "[gHeartbeat] Detected server no response within {threshold} seconds, stopping!!!"
+                "[gHeartbeat {}] Detected server no response within {threshold} seconds, stopping!!!",
+                chrono::offset::Local::now().format("%Y-%m-%d %H:%M:%S")
             );
             kill_process();
         }
@@ -88,8 +90,12 @@ fn bg_check_health(threshold: u64, interval: u64) {
 
 #[lua_function]
 fn ping_alive(_l: LuaState) -> i32 {
-    #[cfg(debug_assertions)]
-    println!("[gHeartbeat DEBUG] Receive PING from game!",);
+    if DEBUG_MODE.load(Ordering::Relaxed) {
+        println!(
+            "[gHeartbeat DEBUG {}] Receive PING from game!",
+            chrono::offset::Local::now().format("%Y-%m-%d %H:%M:%S")
+        );
+    }
 
     ping();
 
@@ -100,8 +106,7 @@ fn ping_alive(_l: LuaState) -> i32 {
 
 #[lua_function]
 fn server_empty_signal(_l: LuaState) -> i32 {
-    #[cfg(debug_assertions)]
-    println!("[gHeartbeat DEBUG] Receive server empty signal from game!",);
+    println!("[gHeartbeat] Receive server empty signal from game!");
 
     IS_NO_PLAYER.store(true, Ordering::Relaxed);
     0
@@ -117,10 +122,15 @@ fn hook_heartbeat(l: LuaState) -> Result<i32, ResultError> {
     IS_HOOKED.store(true, Ordering::Relaxed);
     LAST_HEARTBEAT.store(get_current_time(), Ordering::Relaxed);
 
-    let (threshold, interval) = (
+    let (threshold, interval, debug_on) = (
         luaL_checkinteger(l, 1) as u64,
         luaL_checkinteger(l, 2) as u64,
+        luaL_checkinteger(l, 3) as u8,
     );
+
+    if debug_on == 1 {
+        DEBUG_MODE.store(true, Ordering::Relaxed);
+    }
     thread::spawn(move || bg_check_health(threshold, interval));
     printgm!(l, "[gHeartbeat] Success to hook!");
 

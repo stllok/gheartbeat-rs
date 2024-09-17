@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
   
   push:
+    paths:
+      - "src/*"
+      - "Cargo.toml"
     branches:
       - 'main'
 

@@ -20,6 +20,7 @@ static IS_NO_PLAYER: AtomicBool = AtomicBool::new(true);
 static IS_HOOKED: AtomicBool = AtomicBool::new(false);
 static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 static PID: OnceLock<u32> = OnceLock::new();
+static PAUSED: AtomicBool = AtomicBool::new(false);
 
 #[inline(always)]
 fn get_pid() -> u32 {
@@ -72,7 +73,9 @@ fn bg_check_health(threshold: u64, interval: u64) {
             );
         }
 
-        if !is_health(threshold) {
+        let paused = PAUSED.load(Ordering::Relaxed);
+
+        if !is_health(threshold) && !paused {
             println!(
                 "[gHeartbeat {}] Detected server no response within {threshold} seconds, stopping!!!",
                 chrono::offset::Local::now().format("%Y-%m-%d %H:%M:%S")
@@ -81,7 +84,7 @@ fn bg_check_health(threshold: u64, interval: u64) {
         }
 
         // mark as ping when no player so it won't stop the server when no one inside
-        if IS_NO_PLAYER.load(Ordering::Relaxed) {
+        if IS_NO_PLAYER.load(Ordering::Relaxed) || paused {
             ping();
         }
     }
@@ -144,6 +147,20 @@ fn manual_exit(l: LuaState) -> i32 {
     0
 }
 
+#[lua_function]
+fn pause(l: LuaState) -> i32 {
+    printgm!(l, "[gHeartbeat] Paused...");
+    PAUSED.store(true, Ordering::Relaxed);
+    0
+}
+
+#[lua_function]
+fn resume(l: LuaState) -> i32 {
+    printgm!(l, "[gHeartbeat] Resumed...");
+    PAUSED.store(false, Ordering::Relaxed);
+    0
+}
+
 // Note that since this is #[gmod_open] the name of the function does not matter
 // This is the same for #[gmod_close]
 #[gmod_open]
@@ -162,7 +179,9 @@ fn open(l: LuaState) -> i32 {
         "manual_exit" => manual_exit,
         "hook_heartbeat" => hook_heartbeat,
         "server_empty_signal" => server_empty_signal,
-        "ping_alive"=> ping_alive
+        "ping_alive"=> ping_alive,
+        "pause" => pause,
+        "resume" => resume
     ];
 
     // Register our functions in ``_G.gheartbeat``

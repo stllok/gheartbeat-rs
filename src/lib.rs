@@ -148,8 +148,8 @@ fn manual_exit(l: LuaState) -> i32 {
 }
 
 #[lua_function]
-fn pause(l: LuaState) -> i32 {
-    printgm!(l, "[gHeartbeat] Paused...");
+fn suspend(l: LuaState) -> i32 {
+    printgm!(l, "[gHeartbeat] Suspended...");
     PAUSED.store(true, Ordering::Relaxed);
     0
 }
@@ -180,7 +180,7 @@ fn open(l: LuaState) -> i32 {
         "hook_heartbeat" => hook_heartbeat,
         "server_empty_signal" => server_empty_signal,
         "ping_alive"=> ping_alive,
-        "pause" => pause,
+        "suspend" => suspend,
         "resume" => resume
     ];
 

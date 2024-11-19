@@ -2,7 +2,13 @@
 
 [![Rust Library Build](https://github.com/stllok/gheartbeat-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/stllok/gheartbeat-rs/actions/workflows/rust.yml)
 
-A simple library to send and receive heartbeats.
+A simple health checking library for Garry's mod.
+
+## Detection method
+
+- [x] Time based detection
+- [ ] A2S query
+- [ ] RCON query
 
 ## How to use
 

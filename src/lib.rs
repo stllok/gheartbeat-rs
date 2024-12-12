@@ -1,4 +1,3 @@
-
 use gamedig::{
     protocols::{
         types::GatherToggle,
@@ -46,10 +45,7 @@ impl HealCheckMode {
                     && !pause.load(Ordering::Relaxed)
             }
             HealCheckMode::A2S { retry_count, port } => {
-                let read_timeout = Duration::from_secs(2);
-                let write_timeout = Duration::from_secs(3);
-                let connect_timeout = Duration::from_secs(4);
-
+                // Define timeout (as since localhost we can set the timeout to very fast)
                 valve::query(
                     &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), *port),
                     Engine::Source(None), // We don't specify a steam app id, let the query try to find it.
@@ -60,9 +56,9 @@ impl HealCheckMode {
                     }),
                     Some(
                         TimeoutSettings::new(
-                            Some(read_timeout),
-                            Some(write_timeout),
-                            Some(connect_timeout),
+                            Some(Duration::from_secs(1)),
+                            Some(Duration::from_secs(1)),
+                            Some(Duration::from_secs(1)),
                             *retry_count as usize, // does another request if the first one fails.
                         )
                         .unwrap(),
@@ -120,9 +116,14 @@ fn bg_check_health(interval: u64, healthcheck: HealCheckMode) {
     loop {
         thread::sleep(Duration::from_secs(interval));
 
+        if DEBUG_MODE.load(Ordering::Relaxed) {
+            println!("[gHeartbeat DEBUG] {healthcheck:?}");
+        }
+
         if healthcheck.is_health() && IS_HOOKED.load(Ordering::Relaxed) {
             continue;
         } else {
+            // Either server health check failed or HOOK released
             break;
         }
     }
@@ -255,6 +256,7 @@ fn open(l: LuaState) -> i32 {
     let lib = reg! [
         "manual_exit" => manual_exit,
         "hook_legacy_timer_heartbeat" => hook_legacy_timer_heartbeat,
+        "hook_a2s_heartbeat" => hook_a2s_heartbeat,
         "ping_alive"=> ping_alive,
         "pause" => pause
     ];
@@ -262,12 +264,13 @@ fn open(l: LuaState) -> i32 {
     // Register our functions in ``_G.gheartbeat``
     // This WILL NOT overwrite _G.gheartbeat if it already exists (which it should..)
     luaL_register(l, cstr!("gheartbeat"), lib.as_ptr());
+    
     1
 }
 
 #[gmod_close]
 fn close(l: LuaState) -> i32 {
-    // IS_HOOKED.store(false, Ordering::Relaxed);
+    IS_HOOKED.store(false, Ordering::Relaxed);
     printgm!(l, "[gHeartbeat] Releasing");
     0
 }

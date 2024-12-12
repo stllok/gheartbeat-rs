@@ -1,31 +1,98 @@
+
+use gamedig::{
+    protocols::{
+        types::GatherToggle,
+        valve::{self, Engine, GatheringSettings},
+    },
+    TimeoutSettings,
+};
 use rglua::prelude::*;
 use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        OnceLock,
+        Arc, LazyLock, OnceLock,
     },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use sysinfo::{Pid, Signal, System};
 
+#[derive(Debug)]
+enum HealCheckMode {
+    TimerLegacy {
+        threshold: u64,
+        last_timestamp: Arc<AtomicU64>,
+        pause: Arc<AtomicBool>,
+    },
+    A2S {
+        retry_count: u8,
+        port: u16,
+    },
+    RCON {
+        retry_count: u8,
+        port: u16,
+    },
+}
+impl HealCheckMode {
+    fn is_health(&self) -> bool {
+        match self {
+            HealCheckMode::TimerLegacy {
+                threshold,
+                last_timestamp,
+                pause,
+            } => {
+                (get_current_time() - last_timestamp.load(Ordering::Relaxed) <= *threshold)
+                    && !pause.load(Ordering::Relaxed)
+            }
+            HealCheckMode::A2S { retry_count, port } => {
+                let read_timeout = Duration::from_secs(2);
+                let write_timeout = Duration::from_secs(3);
+                let connect_timeout = Duration::from_secs(4);
+
+                valve::query(
+                    &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), *port),
+                    Engine::Source(None), // We don't specify a steam app id, let the query try to find it.
+                    Some(GatheringSettings {
+                        players: GatherToggle::Skip, // We want to query for players
+                        rules: GatherToggle::Skip,   // We don't want to query for rules
+                        check_app_id: false, // Loosen up the query a bit by not checking app id
+                    }),
+                    Some(
+                        TimeoutSettings::new(
+                            Some(read_timeout),
+                            Some(write_timeout),
+                            Some(connect_timeout),
+                            *retry_count as usize, // does another request if the first one fails.
+                        )
+                        .unwrap(),
+                    ),
+                )
+                .is_ok()
+            }
+            HealCheckMode::RCON { retry_count, port } => todo!(),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum ResultError {
     #[error("You already hook the function!")]
     HookAlreadyExists,
+    #[error("This function only available for timerLegacy health check!")]
+    TimerLegacyHealCheckOnly,
+    #[error("{0}")]
+    UnclassifiedStatic(&'static str),
+    #[error("{0}")]
+    Unclassified(String),
 }
 
-static LAST_HEARTBEAT: AtomicU64 = AtomicU64::new(0);
-static IS_NO_PLAYER: AtomicBool = AtomicBool::new(true);
+// Global state
 static IS_HOOKED: AtomicBool = AtomicBool::new(false);
 static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
-static PID: OnceLock<u32> = OnceLock::new();
-static PAUSED: AtomicBool = AtomicBool::new(false);
-
-#[inline(always)]
-fn get_pid() -> u32 {
-    *PID.get_or_init(std::process::id)
-}
+static PID: LazyLock<u32> = LazyLock::new(std::process::id);
+// Global Timer based state
+static GLOBAL_TIMER_STATE: OnceLock<(Arc<AtomicU64>, Arc<AtomicBool>)> = OnceLock::new();
 
 #[inline(always)]
 fn get_current_time() -> u64 {
@@ -36,94 +103,87 @@ fn get_current_time() -> u64 {
 }
 
 #[inline(always)]
-fn is_health(threshold: u64) -> bool {
-    get_current_time() - LAST_HEARTBEAT.load(Ordering::Relaxed) <= threshold
-}
-
-#[inline(always)]
-fn ping() {
-    LAST_HEARTBEAT.store(get_current_time(), Ordering::Relaxed);
-}
-
-#[inline(always)]
 fn kill_process() {
-    if let Some(process) = System::new_all().process(Pid::from_u32(get_pid())) {
-        println!("[gHeartbeat] Kill with Signal 9");
+    if let Some(process) = System::new_all().process(Pid::from_u32(*PID)) {
+        println!("[gHeartbeat] SIGKILL request");
         process.kill_with(Signal::Kill);
     }
-    println!("[gHeartbeat] Kill process exit");
+    println!("[gHeartbeat] Process exit");
     std::process::exit(0);
 }
 
-fn bg_check_health(threshold: u64, interval: u64) {
+fn bg_check_health(interval: u64, healthcheck: HealCheckMode) {
     println!("[gHeartbeat] Attached health check");
-    println!("[gHeartbeat] Automatic stop server if {threshold} seconds no response");
     println!("[gHeartbeat] Check interval {interval} seconds");
+    IS_HOOKED.store(true, Ordering::Relaxed);
 
-    while IS_HOOKED.load(Ordering::Relaxed) {
+    loop {
         thread::sleep(Duration::from_secs(interval));
 
-        if DEBUG_MODE.load(Ordering::Relaxed) {
-            println!(
-                "[gHeartbeat DEBUG] current time: {}, recorded time: {}, duration: {}, empty server: {}",
-                get_current_time(),
-                LAST_HEARTBEAT.load(Ordering::Relaxed),
-                get_current_time() - LAST_HEARTBEAT.load(Ordering::Relaxed),
-                IS_NO_PLAYER.load(Ordering::Relaxed)
-            );
-        }
-
-        let paused = PAUSED.load(Ordering::Relaxed);
-
-        if !is_health(threshold) && !paused {
-            println!(
-                "[gHeartbeat {}] Detected server no response within {threshold} seconds, stopping!!!",
-                chrono::offset::Local::now().format("%Y-%m-%d %H:%M:%S")
-            );
-            kill_process();
-        }
-
-        // mark as ping when no player so it won't stop the server when no one inside
-        if IS_NO_PLAYER.load(Ordering::Relaxed) || paused {
-            ping();
+        if healthcheck.is_health() && IS_HOOKED.load(Ordering::Relaxed) {
+            continue;
+        } else {
+            break;
         }
     }
-    println!("[gHeartbeat] Dropping background thread");
-}
 
-#[lua_function]
-fn ping_alive(_l: LuaState) -> i32 {
-    if DEBUG_MODE.load(Ordering::Relaxed) {
-        println!(
-            "[gHeartbeat DEBUG {}] Receive PING from game!",
-            chrono::offset::Local::now().format("%Y-%m-%d %H:%M:%S")
-        );
+    if IS_HOOKED.load(Ordering::Relaxed) {
+        println!("[gHeartbeat] Server health check failed");
+        kill_process();
+    } else {
+        println!("[gHeartbeat] Receive exit request");
     }
-
-    ping();
-
-    // as server responsed, server must contain player inside
-    IS_NO_PLAYER.store(false, Ordering::Relaxed);
-    0
 }
 
 #[lua_function]
-fn server_empty_signal(_l: LuaState) -> i32 {
-    println!("[gHeartbeat] Receive server empty signal from game!");
+fn ping_alive(_l: LuaState) -> Result<i32, ResultError> {
+    match GLOBAL_TIMER_STATE.get() {
+        Some((last_ping, _)) => {
+            if DEBUG_MODE.load(Ordering::Relaxed) {
+                println!(
+                    "[gHeartbeat DEBUG {}] Receive PING from game!",
+                    chrono::offset::Local::now().format("%Y-%m-%d %H:%M:%S")
+                );
+            }
 
-    IS_NO_PLAYER.store(true, Ordering::Relaxed);
-    0
+            last_ping.store(get_current_time(), Ordering::Relaxed);
+            Ok(0)
+        }
+        None => Err(ResultError::TimerLegacyHealCheckOnly),
+    }
 }
 
 #[lua_function]
-fn hook_heartbeat(l: LuaState) -> Result<i32, ResultError> {
+fn hook_a2s_heartbeat(l: LuaState) -> Result<i32, ResultError> {
     if IS_HOOKED.load(Ordering::Relaxed) {
         return Err(ResultError::HookAlreadyExists);
     }
 
-    printgm!(l, "[gHeartbeat] Hooking to the modules!");
-    IS_HOOKED.store(true, Ordering::Relaxed);
-    LAST_HEARTBEAT.store(get_current_time(), Ordering::Relaxed);
+    printgm!(l, "[gHeartbeat] Acquire a2s heartbeat!");
+    let (retry_count, port, debug_on) = (
+        luaL_checkinteger(l, 1) as u8,
+        luaL_checkinteger(l, 2) as u16,
+        luaL_checkinteger(l, 3) as u8,
+    );
+
+    // set state
+    DEBUG_MODE.store(debug_on.eq(&1), Ordering::Relaxed);
+
+    // spawn bg
+    thread::spawn(move || bg_check_health(10, HealCheckMode::A2S { retry_count, port }));
+
+    printgm!(l, "[gHeartbeat] Success to hook!");
+
+    Ok(0)
+}
+
+#[lua_function]
+fn hook_legacy_timer_heartbeat(l: LuaState) -> Result<i32, ResultError> {
+    if IS_HOOKED.load(Ordering::Relaxed) {
+        return Err(ResultError::HookAlreadyExists);
+    }
+
+    printgm!(l, "[gHeartbeat] Acquire legacy timer heartbeat!");
 
     let (threshold, interval, debug_on) = (
         luaL_checkinteger(l, 1) as u64,
@@ -131,10 +191,29 @@ fn hook_heartbeat(l: LuaState) -> Result<i32, ResultError> {
         luaL_checkinteger(l, 3) as u8,
     );
 
-    if debug_on == 1 {
-        DEBUG_MODE.store(true, Ordering::Relaxed);
-    }
-    thread::spawn(move || bg_check_health(threshold, interval));
+    let last_timestamp = Arc::new(AtomicU64::new(get_current_time()));
+    let pause = Arc::new(AtomicBool::new(false));
+
+    // set state
+    GLOBAL_TIMER_STATE
+        .set((last_timestamp.clone(), pause.clone()))
+        .map_err(|_| {
+            ResultError::UnclassifiedStatic("Global state set already..? it should be a bug!")
+        })?;
+    DEBUG_MODE.store(debug_on.eq(&1), Ordering::Relaxed);
+
+    // spawn bg
+    thread::spawn(move || {
+        bg_check_health(
+            interval,
+            HealCheckMode::TimerLegacy {
+                threshold,
+                last_timestamp,
+                pause,
+            },
+        )
+    });
+
     printgm!(l, "[gHeartbeat] Success to hook!");
 
     Ok(0)
@@ -148,17 +227,18 @@ fn manual_exit(l: LuaState) -> i32 {
 }
 
 #[lua_function]
-fn suspend(l: LuaState) -> i32 {
-    printgm!(l, "[gHeartbeat] Suspended...");
-    PAUSED.store(true, Ordering::Relaxed);
-    0
-}
+fn pause(l: LuaState) -> Result<i32, ResultError> {
+    match GLOBAL_TIMER_STATE.get() {
+        Some((_, pause)) => {
+            let pause_val = luaL_checkinteger(l, 1) as u8;
 
-#[lua_function]
-fn resume(l: LuaState) -> i32 {
-    printgm!(l, "[gHeartbeat] Resumed...");
-    PAUSED.store(false, Ordering::Relaxed);
-    0
+            printgm!(l, "[gHeartbeat] Requesting pause...");
+            pause.store(pause_val == 1, Ordering::Relaxed);
+
+            Ok(0)
+        }
+        None => Err(ResultError::TimerLegacyHealCheckOnly),
+    }
 }
 
 // Note that since this is #[gmod_open] the name of the function does not matter
@@ -169,19 +249,14 @@ fn open(l: LuaState) -> i32 {
     printgm!(l, "[gHeartbeat] Initializing");
 
     #[cfg(debug_assertions)]
-    printgm!(l, "[gHeartbeat DEBUG] PID: {}", get_pid());
-
-    // get PID at start
-    get_pid();
+    printgm!(l, "[gHeartbeat DEBUG] PID: {}", *PID);
 
     // Create a library to organize all of our functions to export to gmod.
     let lib = reg! [
         "manual_exit" => manual_exit,
-        "hook_heartbeat" => hook_heartbeat,
-        "server_empty_signal" => server_empty_signal,
+        "hook_legacy_timer_heartbeat" => hook_legacy_timer_heartbeat,
         "ping_alive"=> ping_alive,
-        "suspend" => suspend,
-        "resume" => resume
+        "pause" => pause
     ];
 
     // Register our functions in ``_G.gheartbeat``
@@ -192,7 +267,7 @@ fn open(l: LuaState) -> i32 {
 
 #[gmod_close]
 fn close(l: LuaState) -> i32 {
-    IS_HOOKED.store(false, Ordering::Relaxed);
+    // IS_HOOKED.store(false, Ordering::Relaxed);
     printgm!(l, "[gHeartbeat] Releasing");
     0
 }

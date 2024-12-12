@@ -24,25 +24,19 @@ jobs:
           include:
               - name: gmsv_gheartbeat_win32.dll
                 target: i686-pc-windows-msvc
-                os: windows-latest
+                os: windows-2022
               - name: gmsv_gheartbeat_win64.dll
                 target: x86_64-pc-windows-msvc
-                os: windows-latest
+                os: windows-2022
               - name: gmsv_gheartbeat_linux.dll
                 target: i686-unknown-linux-gnu
-                os: ubuntu-latest
+                os: ubuntu-24.04
               - name: gmsv_gheartbeat_linux64.dll
                 target: x86_64-unknown-linux-gnu
-                os: ubuntu-latest
+                os: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
-      - name: Install Rust (stable)
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
 
       - name: Install gcc multilib for linux
         if: runner.os == 'Linux'
@@ -52,10 +46,11 @@ jobs:
         shell: bash
 
       - name: Build for target ${{ matrix.target }}
-        uses: actions-rs/cargo@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          command: build
-          args: --release --target ${{ matrix.target }}
+          toolchain: stable
+          target: ${{ matrix.target }}
+          run: cargo build --release --target ${{ matrix.target }}
 
       - name: Create Release Directory
         run: mkdir -p release/${{ matrix.target }}
@@ -68,13 +63,12 @@ jobs:
            elif [ "$RUNNER_OS" == "Windows" ]; then
                 mv target/${{ matrix.target }}/release/gheartbeat_rs.dll release/${{ matrix.target }}/${{ matrix.name }}
            else
-                echo "$RUNNER_OS not supported"
                 exit 1
            fi
         shell: bash
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: release/${{ matrix.target }}/${{ matrix.name }}

@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 chrono = "0.4"
-gamedig = { version = "0.6.1", default-features = false }
+a2s = "0.5"
 rglua = "3.0.0-beta2"
 sysinfo = { version = "0.30", default-features = false }
 thiserror = "1.0"

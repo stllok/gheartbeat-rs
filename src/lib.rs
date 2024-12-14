@@ -1,4 +1,5 @@
 use a2s::A2SClient;
+use local_ip_address::local_ip;
 use rglua::prelude::*;
 use std::{
     sync::{
@@ -40,7 +41,7 @@ impl HealCheckMode {
             HealCheckMode::A2S { retry_count, port } => {
                 // Define timeout (as since localhost we can set the timeout to very fast)
                 (0..*retry_count)
-                    .find_map(|_| A2S_CLIENT.info(format!("127.0.0.1:{port}")).ok())
+                    .find_map(|_| A2S_CLIENT.info(format!("{}:{port}", *LOCAL_IP)).ok())
                     .is_some()
             }
             HealCheckMode::RCON { retry_count, port } => todo!(),
@@ -68,6 +69,7 @@ static PID: LazyLock<u32> = LazyLock::new(std::process::id);
 static GLOBAL_TIMER_STATE: OnceLock<(Arc<AtomicU64>, Arc<AtomicBool>)> = OnceLock::new();
 // Global A2S state
 static A2S_CLIENT: LazyLock<A2SClient> = LazyLock::new(|| A2SClient::new().unwrap());
+static LOCAL_IP: LazyLock<String> = LazyLock::new(|| local_ip().unwrap().to_string());
 
 #[inline(always)]
 fn get_current_time() -> u64 {

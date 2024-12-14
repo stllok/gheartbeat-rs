@@ -1,13 +1,6 @@
-use gamedig::{
-    protocols::{
-        types::GatherToggle,
-        valve::{self, Engine, GatheringSettings},
-    },
-    TimeoutSettings,
-};
+use a2s::A2SClient;
 use rglua::prelude::*;
 use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, LazyLock, OnceLock,
@@ -46,25 +39,9 @@ impl HealCheckMode {
             }
             HealCheckMode::A2S { retry_count, port } => {
                 // Define timeout (as since localhost we can set the timeout to very fast)
-                valve::query(
-                    &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), *port),
-                    Engine::Source(None), // We don't specify a steam app id, let the query try to find it.
-                    Some(GatheringSettings {
-                        players: GatherToggle::Skip, // We want to query for players
-                        rules: GatherToggle::Skip,   // We don't want to query for rules
-                        check_app_id: false, // Loosen up the query a bit by not checking app id
-                    }),
-                    Some(
-                        TimeoutSettings::new(
-                            Some(Duration::from_secs(1)),
-                            Some(Duration::from_secs(1)),
-                            Some(Duration::from_secs(1)),
-                            *retry_count as usize, // does another request if the first one fails.
-                        )
-                        .unwrap(),
-                    ),
-                )
-                .is_ok()
+                (0..*retry_count)
+                    .find_map(|_| A2S_CLIENT.info(format!("127.0.0.1:{port}")).ok())
+                    .is_some()
             }
             HealCheckMode::RCON { retry_count, port } => todo!(),
         }
@@ -89,6 +66,8 @@ static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 static PID: LazyLock<u32> = LazyLock::new(std::process::id);
 // Global Timer based state
 static GLOBAL_TIMER_STATE: OnceLock<(Arc<AtomicU64>, Arc<AtomicBool>)> = OnceLock::new();
+// Global A2S state
+static A2S_CLIENT: LazyLock<A2SClient> = LazyLock::new(|| A2SClient::new().unwrap());
 
 #[inline(always)]
 fn get_current_time() -> u64 {
@@ -264,7 +243,7 @@ fn open(l: LuaState) -> i32 {
     // Register our functions in ``_G.gheartbeat``
     // This WILL NOT overwrite _G.gheartbeat if it already exists (which it should..)
     luaL_register(l, cstr!("gheartbeat"), lib.as_ptr());
-    
+
     1
 }
 

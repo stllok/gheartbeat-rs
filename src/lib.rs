@@ -173,7 +173,7 @@ fn hook_legacy_timer_heartbeat(l: LuaState) -> Result<i32, ResultError> {
     );
 
     let last_timestamp = Arc::new(AtomicU64::new(get_current_time()));
-    let pause = Arc::new(AtomicBool::new(false));
+    let pause = Arc::new(AtomicBool::new(true));
 
     // set state
     GLOBAL_TIMER_STATE

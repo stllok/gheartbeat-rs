@@ -11,16 +11,6 @@ use std::{
 };
 use sysinfo::{Pid, Signal, System};
 
-macro_rules! print_with_prefix {
-    ($msg:expr) => {
-        println!(
-            "[gheartbeat-rs {}] {}",
-            chrono::offset::Local::now().format("%Y-%m-%d %H:%M:%S"),
-            $msg
-        );
-    };
-}
-
 #[derive(Debug)]
 enum HealCheckMode {
     TimerLegacy {
@@ -54,7 +44,7 @@ impl HealCheckMode {
                     if A2S_CLIENT.info(format!("{}:{port}", *LOCAL_IP)).is_ok() {
                         return true;
                     }
-                    print_with_prefix!("Attempt ping [{i}/{retry_count}]");
+                    println!("Attempt ping [{i}/{retry_count}]");
                 }
 
                 false
@@ -97,23 +87,23 @@ fn get_current_time() -> u64 {
 #[inline(always)]
 fn kill_process() {
     if let Some(process) = System::new_all().process(Pid::from_u32(*PID)) {
-        print_with_prefix!("SIGTERM request");
-        process.kill_with(Signal::Term);
+        println!("[gHeartbeat] SIGKILL request");
+        process.kill_with(Signal::Kill);
     }
-    print_with_prefix!("Process exit");
+    println!("[gHeartbeat] Process exit");
     std::process::exit(0);
 }
 
 fn bg_check_health(interval: u64, healthcheck: HealCheckMode) {
-    print_with_prefix!("Attached health check");
-    print_with_prefix!("Check interval {interval} seconds");
+    println!("[gHeartbeat] Attached health check");
+    println!("[gHeartbeat] Check interval {interval} seconds");
     IS_HOOKED.store(true, Ordering::Relaxed);
 
     loop {
         thread::sleep(Duration::from_secs(interval));
 
         if DEBUG_MODE.load(Ordering::Relaxed) {
-            print_with_prefix!("{healthcheck:?}");
+            println!("[gHeartbeat DEBUG] {healthcheck:?}");
         }
 
         if healthcheck.is_health() && IS_HOOKED.load(Ordering::Relaxed) {
@@ -125,10 +115,10 @@ fn bg_check_health(interval: u64, healthcheck: HealCheckMode) {
     }
 
     if IS_HOOKED.load(Ordering::Relaxed) {
-        print_with_prefix!("Server health check failed");
+        println!("[gHeartbeat] Server health check failed");
         kill_process();
     } else {
-        print_with_prefix!("Receive exit request");
+        println!("[gHeartbeat] Receive exit request");
     }
 }
 
@@ -137,7 +127,10 @@ fn ping_alive(_l: LuaState) -> Result<i32, ResultError> {
     match GLOBAL_TIMER_STATE.get() {
         Some((last_ping, _)) => {
             if DEBUG_MODE.load(Ordering::Relaxed) {
-                print_with_prefix!("Receive PING from game!");
+                println!(
+                    "[gHeartbeat DEBUG {}] Receive PING from game!",
+                    chrono::offset::Local::now().format("%Y-%m-%d %H:%M:%S")
+                );
             }
 
             last_ping.store(get_current_time(), Ordering::Relaxed);

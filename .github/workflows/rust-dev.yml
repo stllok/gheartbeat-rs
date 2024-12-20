@@ -1,0 +1,87 @@
+name: Rust Library Build (Develop)
+
+on:
+  # Trigger the workflow manually
+  workflow_dispatch:
+
+  push:
+    paths:
+      - "src/*"
+      - "Cargo.toml"
+    branches:
+      - "dev"
+
+env:
+  CARGO_TERM_COLOR: always # Ensure colored output in logs
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        target:
+          [
+            i686-pc-windows-msvc,
+            x86_64-pc-windows-msvc,
+            i686-unknown-linux-gnu,
+            x86_64-unknown-linux-gnu,
+          ]
+        include:
+          - name: gmsv_gheartbeat_win32.dll
+            target: i686-pc-windows-msvc
+            os: windows-2022
+          - name: gmsv_gheartbeat_win64.dll
+            target: x86_64-pc-windows-msvc
+            os: windows-2022
+          - name: gmsv_gheartbeat_linux.dll
+            target: i686-unknown-linux-gnu
+            os: ubuntu-24.04
+          - name: gmsv_gheartbeat_linux64.dll
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Install gcc multilib for linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install gcc-multilib -y
+        shell: bash
+
+      - name: Build for target ${{ matrix.target }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --target ${{ matrix.target }}
+
+      - name: Create Release Directory
+        run: mkdir -p release/${{ matrix.target }}
+
+      - name: Move Artifacts
+        run: |
+          ls target/${{ matrix.target }}/release/
+          if [ "$RUNNER_OS" == "Linux" ]; then
+               mv target/${{ matrix.target }}/release/libgheartbeat_rs.so release/${{ matrix.target }}/${{ matrix.name }}
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+               mv target/${{ matrix.target }}/release/gheartbeat_rs.dll release/${{ matrix.target }}/${{ matrix.name }}
+          else
+               exit 1
+          fi
+        shell: bash
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: release/${{ matrix.target }}/${{ matrix.name }}
+          retention-days: 90
+          compression-level: 9

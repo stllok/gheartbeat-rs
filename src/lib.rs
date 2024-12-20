@@ -40,9 +40,14 @@ impl HealCheckMode {
             }
             HealCheckMode::A2S { retry_count, port } => {
                 // Define timeout (as since localhost we can set the timeout to very fast)
-                (0..*retry_count)
-                    .find_map(|_| A2S_CLIENT.info(format!("{}:{port}", *LOCAL_IP)).ok())
-                    .is_some()
+                for i in 0..*retry_count {
+                    if A2S_CLIENT.info(format!("{}:{port}", *LOCAL_IP)).is_ok() {
+                        return true;
+                    }
+                    println!("Attempt ping [{i}/{retry_count}]");
+                }
+
+                false
             }
             HealCheckMode::RCON { retry_count, port } => todo!(),
         }

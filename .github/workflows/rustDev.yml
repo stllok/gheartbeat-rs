@@ -8,6 +8,7 @@ on:
     paths:
       - "src/*"
       - "Cargo.toml"
+      - ".github/workflows/rustDev.yml"
     branches:
       - "dev"
 

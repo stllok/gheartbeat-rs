@@ -70,9 +70,9 @@ jobs:
         run: |
           ls target/${{ matrix.target }}/release/
           if [ "$RUNNER_OS" == "Linux" ]; then
-               mv target/${{ matrix.target }}/release/libgheartbeat_rs.so release/${{ matrix.target }}/${{ matrix.name }}
+               mv target/${{ matrix.target }}/debug/libgheartbeat_rs.so release/${{ matrix.target }}/${{ matrix.name }}
           elif [ "$RUNNER_OS" == "Windows" ]; then
-               mv target/${{ matrix.target }}/release/gheartbeat_rs.dll release/${{ matrix.target }}/${{ matrix.name }}
+               mv target/${{ matrix.target }}/debug/gheartbeat_rs.dll release/${{ matrix.target }}/${{ matrix.name }}
           else
                exit 1
           fi
@@ -83,5 +83,5 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: release/${{ matrix.target }}/${{ matrix.name }}
-          retention-days: 90
+          retention-days: 7
           compression-level: 9

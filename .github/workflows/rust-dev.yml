@@ -68,7 +68,7 @@ jobs:
 
       - name: Move Artifacts
         run: |
-          ls target/${{ matrix.target }}/release/
+          ls target/${{ matrix.target }}/debug/
           if [ "$RUNNER_OS" == "Linux" ]; then
                mv target/${{ matrix.target }}/debug/libgheartbeat_rs.so release/${{ matrix.target }}/${{ matrix.name }}
           elif [ "$RUNNER_OS" == "Windows" ]; then

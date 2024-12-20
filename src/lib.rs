@@ -29,6 +29,9 @@ enum HealCheckMode {
 }
 impl HealCheckMode {
     fn is_health(&self) -> bool {
+        if DEBUG_MODE.load(Ordering::Relaxed) {
+            println!("[gHeartbeat DEBUG] Acquire check with {self:?}");
+        }
         match self {
             HealCheckMode::TimerLegacy {
                 threshold,
@@ -44,7 +47,7 @@ impl HealCheckMode {
                     if A2S_CLIENT.info(format!("{}:{port}", *LOCAL_IP)).is_ok() {
                         return true;
                     }
-                    println!("Attempt ping [{i}/{retry_count}]");
+                    println!("Attempt a2s query [{i}/{retry_count}]");
                 }
 
                 false
@@ -62,8 +65,6 @@ enum ResultError {
     TimerLegacyHealCheckOnly,
     #[error("{0}")]
     UnclassifiedStatic(&'static str),
-    #[error("{0}")]
-    Unclassified(String),
 }
 
 // Global state
@@ -87,8 +88,8 @@ fn get_current_time() -> u64 {
 #[inline(always)]
 fn kill_process() {
     if let Some(process) = System::new_all().process(Pid::from_u32(*PID)) {
-        println!("[gHeartbeat] SIGKILL request");
-        process.kill_with(Signal::Kill);
+        println!("[gHeartbeat] SIGTERM request");
+        process.kill_with(Signal::Term);
     }
     println!("[gHeartbeat] Process exit");
     std::process::exit(0);
@@ -101,10 +102,6 @@ fn bg_check_health(interval: u64, healthcheck: HealCheckMode) {
 
     loop {
         thread::sleep(Duration::from_secs(interval));
-
-        if DEBUG_MODE.load(Ordering::Relaxed) {
-            println!("[gHeartbeat DEBUG] {healthcheck:?}");
-        }
 
         if healthcheck.is_health() && IS_HOOKED.load(Ordering::Relaxed) {
             continue;
@@ -125,7 +122,7 @@ fn bg_check_health(interval: u64, healthcheck: HealCheckMode) {
 #[lua_function]
 fn ping_alive(_l: LuaState) -> Result<i32, ResultError> {
     match GLOBAL_TIMER_STATE.get() {
-        Some((last_ping, _)) => {
+        Some((last_ping, pause)) => {
             if DEBUG_MODE.load(Ordering::Relaxed) {
                 println!(
                     "[gHeartbeat DEBUG {}] Receive PING from game!",
@@ -134,6 +131,8 @@ fn ping_alive(_l: LuaState) -> Result<i32, ResultError> {
             }
 
             last_ping.store(get_current_time(), Ordering::Relaxed);
+            // receive ping from server = server is not pause
+            pause.store(false, Ordering::Relaxed);
             Ok(0)
         }
         None => Err(ResultError::TimerLegacyHealCheckOnly),
@@ -147,14 +146,10 @@ fn hook_a2s_heartbeat(l: LuaState) -> Result<i32, ResultError> {
     }
 
     printgm!(l, "[gHeartbeat] Acquire a2s heartbeat!");
-    let (retry_count, port, debug_on) = (
+    let (retry_count, port) = (
         luaL_checkinteger(l, 1) as u8,
         luaL_checkinteger(l, 2) as u16,
-        luaL_checkinteger(l, 3) as u8,
     );
-
-    // set state
-    DEBUG_MODE.store(debug_on.eq(&1), Ordering::Relaxed);
 
     // spawn bg
     thread::spawn(move || bg_check_health(10, HealCheckMode::A2S { retry_count, port }));
@@ -172,10 +167,9 @@ fn hook_legacy_timer_heartbeat(l: LuaState) -> Result<i32, ResultError> {
 
     printgm!(l, "[gHeartbeat] Acquire legacy timer heartbeat!");
 
-    let (threshold, interval, debug_on) = (
+    let (threshold, interval) = (
         luaL_checkinteger(l, 1) as u64,
         luaL_checkinteger(l, 2) as u64,
-        luaL_checkinteger(l, 3) as u8,
     );
 
     let last_timestamp = Arc::new(AtomicU64::new(get_current_time()));
@@ -187,7 +181,6 @@ fn hook_legacy_timer_heartbeat(l: LuaState) -> Result<i32, ResultError> {
         .map_err(|_| {
             ResultError::UnclassifiedStatic("Global state set already..? it should be a bug!")
         })?;
-    DEBUG_MODE.store(debug_on.eq(&1), Ordering::Relaxed);
 
     // spawn bg
     thread::spawn(move || {
@@ -204,6 +197,14 @@ fn hook_legacy_timer_heartbeat(l: LuaState) -> Result<i32, ResultError> {
     printgm!(l, "[gHeartbeat] Success to hook!");
 
     Ok(0)
+}
+
+#[lua_function]
+fn set_debug(l: LuaState) -> i32 {
+    // set state
+    DEBUG_MODE.store((luaL_checkinteger(l, 1) as u8).eq(&1), Ordering::Relaxed);
+
+    0
 }
 
 #[lua_function]
@@ -244,7 +245,8 @@ fn open(l: LuaState) -> i32 {
         "hook_legacy_timer_heartbeat" => hook_legacy_timer_heartbeat,
         "hook_a2s_heartbeat" => hook_a2s_heartbeat,
         "ping_alive"=> ping_alive,
-        "pause" => pause
+        "pause" => pause,
+        "set_debug" => set_debug
     ];
 
     // Register our functions in ``_G.gheartbeat``

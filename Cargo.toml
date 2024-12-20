@@ -10,8 +10,8 @@ crate-type = ["cdylib"]
 chrono = "0.4"
 a2s = "0.5"
 rglua = "3.0.0-beta2"
-sysinfo = { version = "0.30", default-features = false }
-thiserror = "1.0"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+thiserror = "2.0"
 local-ip-address = "0.6.3"
 
 [profile.release]
